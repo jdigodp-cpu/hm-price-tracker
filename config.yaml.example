@@ -21,14 +21,20 @@ settings:
   data_dir: "data"
 
 products:
-  - name: "My Cotton Shirt (bought ₹1499)"
-    url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
-    bought_price: 1499.0
-    target_price: null
-    currency: "INR"
+  # Each product can have multiple sources (H&M and/or Myntra).
+  # Just add the URL — baseline price is set automatically on first check.
+  # You'll be alerted when price drops below baseline AND sizes are available.
 
-  - name: "Wishlist Jacket (steal price ₹2499)"
-    url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
-    bought_price: null
-    target_price: 2499.0
+  - name: "My Cotton Shirt"
     currency: "INR"
+    sources:
+      - site: hm
+        url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
+
+  - name: "Same Jacket on Both Stores"
+    currency: "INR"
+    sources:
+      - site: hm
+        url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
+      - site: myntra
+        url: "https://www.myntra.com/REPLACE_ME"

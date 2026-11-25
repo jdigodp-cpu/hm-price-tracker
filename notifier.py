@@ -98,13 +98,14 @@ class Notifier:
     # ------------------------------------------------------------------ #
     def send_alert(self, product_name: str, url: str, current_price: float,
                    bought_price: Optional[float], target_price: Optional[float],
-                   reason: str) -> None:
+                   reason: str, site: str = "hm") -> None:
         """Fire an alert across every enabled channel."""
         if not self.enabled:
             return
 
+        site_label = site.upper() if site else "H&M"
         lines = [
-            f"🛍️ <b>H&M India price alert</b>",
+            f"🛍️ <b>{site_label} price alert</b>",
             f"<b>{product_name}</b>",
             f"Current price: <b>₹{current_price:,.2f}</b>",
         ]
@@ -116,10 +117,11 @@ class Notifier:
         lines.append(f"<a href=\"{url}\">View product</a>")
         message = "\n".join(lines)
 
-        subject = f"H&M price drop: {product_name} — ₹{current_price:,.2f}"
+        subject = f"{site_label} price drop: {product_name} — ₹{current_price:,.2f}"
         email_body = "\n".join(
             f"{k}: {v}" for k, v in [
                 ("Product", product_name),
+                ("Site", site_label),
                 ("Current price", f"₹{current_price:,.2f}"),
                 ("You paid", f"₹{bought_price:,.2f}" if bought_price is not None else "—"),
                 ("Target price", f"₹{target_price:,.2f}" if target_price is not None else "—"),

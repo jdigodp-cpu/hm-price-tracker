@@ -1,15 +1,16 @@
 """Telegram bot for remote product management.
 
 Run this on your PC (keep it running in a terminal window) and you can add,
-list, and remove tracked H&M products from your phone via Telegram.
+list, and remove tracked products from your phone via Telegram.
+
+Tracks products across H&M India and Myntra. Each product can have multiple
+sources (one URL per site). Baseline price is set automatically on first check.
 
 Commands (send to your bot):
-  /add <url>                          Add a product (no price targets)
-  /add <url> <target_price>           Add with a steal/target price (₹)
-  /add <url> <bought_price> <target_price>  Add with both prices
-  /list                               List all tracked products
-  /remove <url-or-index>              Remove a product by URL or list index
-  /status                             Show current price of every tracked product
+  /add <url>                          Add a product URL (H&M or Myntra)
+  /list                               List all tracked products with baselines
+  /remove <name-or-#>                 Remove a tracked product
+  /status                             Check current price & sizes of all products
   /help                               Show this help
 
 Setup:
@@ -40,13 +41,24 @@ log = logging.getLogger("hm-bot")
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.yaml"
-HM_URL_RE = re.compile(r"https?://(?:www2\.)?hm\.com/en_in/productpage\.\d+\.html")
+STATE_PATH = BASE_DIR / "data" / "prices.json"
+
+HM_URL_RE = re.compile(r"hm\.com/en_in/productpage\.\d+\.html")
+MYNTRA_URL_RE = re.compile(r"myntra\.com")
 
 POLL_INTERVAL = 2.0  # seconds between getUpdates polls
 
 
+def _detect_site(url: str) -> str:
+    if MYNTRA_URL_RE.search(url):
+        return "myntra"
+    if HM_URL_RE.search(url):
+        return "hm"
+    return "hm"  # default fallback
+
+
 class TelegramBot:
-    """A simple polling Telegram bot for managing H&M price tracking."""
+    """A simple polling Telegram bot for managing price tracking."""
 
     def __init__(self, config_path: Path = CONFIG_PATH) -> None:
         self.config_path = config_path
@@ -55,7 +67,6 @@ class TelegramBot:
         self.offset: Optional[int] = None
         self._running = True
 
-        # Wire up signal handlers for graceful shutdown.
         signal.signal(signal.SIGINT, self._shutdown)
         signal.signal(signal.SIGTERM, self._shutdown)
 
@@ -71,6 +82,15 @@ class TelegramBot:
     def _save_config(self) -> None:
         with self.config_path.open("w", encoding="utf-8") as fh:
             yaml.safe_dump(self.config, fh, sort_keys=False, allow_unicode=True)
+
+    def _load_state(self) -> dict:
+        if STATE_PATH.exists():
+            try:
+                with STATE_PATH.open("r", encoding="utf-8") as fh:
+                    return yaml.safe_load(fh) or {}
+            except Exception:
+                return {}
+        return {}
 
     def _load_credentials(self) -> None:
         tg = self.config.get("notifications", {}).get("telegram", {}) or {}
@@ -143,11 +163,11 @@ class TelegramBot:
         return self.config.setdefault("products", [])
 
     def _find_product_index(self, ref: str) -> Optional[int]:
-        """Find product index by URL match or list position (1-based)."""
+        """Find product index by name match or list position (1-based)."""
         products = self._products()
-        # Try exact URL match first.
+        # Try exact name match (case-insensitive).
         for i, p in enumerate(products):
-            if p.get("url") == ref:
+            if p.get("name", "").lower() == ref.lower():
                 return i
         # Try index (1-based).
         try:
@@ -158,99 +178,97 @@ class TelegramBot:
             pass
         return None
 
-    def _is_hm_url(self, url: str) -> bool:
-        return bool(HM_URL_RE.search(url.strip()))
+    def _source_urls(self, product: dict) -> list:
+        """Return list of (site, url) tuples for a product."""
+        sources = product.get("sources", [])
+        if sources:
+            return [(s.get("site", "hm"), s.get("url", "")) for s in sources]
+        # Backward compat: single url field.
+        url = product.get("url", "")
+        site = product.get("site", _detect_site(url))
+        return [(site, url)] if url else []
 
     # ------------------------------------------------------------------ #
     # Command handlers
     # ------------------------------------------------------------------ #
     def _cmd_help(self) -> str:
         return (
-            "<b>H&amp;M Price Tracker — Bot Commands</b>\n\n"
+            "<b>Price Tracker — Bot Commands</b>\n\n"
             "/add &lt;url&gt;\n"
-            "  Add a product to track.\n\n"
-            "/add &lt;url&gt; &lt;target_price&gt;\n"
-            "  Add and alert when price drops to/below this (₹).\n\n"
-            "/add &lt;url&gt; &lt;bought_price&gt; &lt;target_price&gt;\n"
-            "  Add with both what you paid and your steal price.\n\n"
+            "  Add an H&M or Myntra product URL to track.\n\n"
             "/list\n"
-            "  Show all tracked products.\n\n"
-            "/remove &lt;url or #&gt;\n"
-            "  Remove a product (use the number from /list).\n\n"
+            "  Show all tracked products with baseline prices & sizes.\n\n"
+            "/remove &lt;name or #&gt;\n"
+            "  Remove a tracked product (use # from /list).\n\n"
             "/status\n"
-            "  Check current price of every tracked product.\n\n"
+            "  Check current price & available sizes of all products.\n\n"
             "/help\n"
             "  Show this message.\n\n"
-            "Tip: copy a product link from the H&amp;M India app/site and paste it "
-            "here with /add."
+            "Tip: paste a product link from H&M India or Myntra. You'll be alerted\n"
+            "when the price drops below your baseline AND sizes are available.\n"
         )
 
     def _cmd_add(self, args: list) -> str:
         if not args:
-            return "Usage: /add &lt;url&gt; [bought_price] [target_price]"
+            return "Usage: /add &lt;url&gt;"
 
         url = args[0].strip()
-        if not self._is_hm_url(url):
+        site = _detect_site(url)
+
+        if site == "hm" and not HM_URL_RE.search(url):
             return (
                 "That doesn't look like an H&amp;M India product URL.\n"
                 "Expected: https://www2.hm.com/en_in/productpage.1234567.html"
             )
 
-        # Check for duplicates.
-        for p in self._products():
-            if p.get("url") == url:
-                return f"That product is already being tracked:\n{url}"
+        # Check if product already exists (by name derived from URL, or URL already in sources).
+        products = self._products()
+        for p in products:
+            for s_site, s_url in self._source_urls(p):
+                if s_url == url:
+                    return f"That URL is already being tracked:\n<code>{url}</code>"
 
-        bought_price: Optional[float] = None
-        target_price: Optional[float] = None
-
-        if len(args) >= 2:
-            try:
-                target_price = float(args[1].replace(",", "").replace("₹", ""))
-            except ValueError:
-                return f"Invalid price: {args[1]}"
-        if len(args) >= 3:
-            try:
-                bought_price = float(args[2].replace(",", "").replace("₹", ""))
-            except ValueError:
-                return f"Invalid price: {args[2]}"
-
-        product: dict = {"name": url, "url": url, "currency": "INR"}
-        if bought_price is not None:
-            product["bought_price"] = bought_price
-        if target_price is not None:
-            product["target_price"] = target_price
-
-        self._products().append(product)
+        # Use URL as name (user can rename later).
+        name = url.split("/")[-1]
+        product: dict = {
+            "name": name,
+            "currency": "INR",
+            "sources": [{"site": site, "url": url}],
+        }
+        products.append(product)
         self._save_config()
 
-        lines = [f"✅ Added: <code>{url}</code>"]
-        if bought_price is not None:
-            lines.append(f"Bought price: ₹{bought_price:,.2f}")
-        if target_price is not None:
-            lines.append(f"Target price: ₹{target_price:,.2f}")
-        return "\n".join(lines)
+        site_label = site.upper()
+        return (
+            f"✅ Added ({site_label}): <code>{url}</code>\n"
+            f"Baseline price & sizes will be set on the first check."
+        )
 
     def _cmd_list(self) -> str:
         products = self._products()
         if not products:
             return "No products being tracked yet. Use /add &lt;url&gt; to add one."
+
+        state = self._load_state()
         lines = ["<b>Tracked products:</b>"]
         for i, p in enumerate(products, 1):
-            name = p.get("name") or p.get("url")
-            url = p.get("url", "")
-            parts = [f"{i}. <b>{name}</b>"]
-            if p.get("bought_price") is not None:
-                parts.append(f"paid ₹{p['bought_price']:,.2f}")
-            if p.get("target_price") is not None:
-                parts.append(f"target ₹{p['target_price']:,.2f}")
-            parts.append(f"<code>{url}</code>")
-            lines.append(" · ".join(parts))
+            name = p.get("name") or "Untitled"
+            product_state = state.get(name, {})
+            src_states = product_state.get("sources", {})
+            lines.append(f"{i}. <b>{name}</b>")
+            for site, url in self._source_urls(p):
+                src = src_states.get(url, {})
+                baseline = src.get("baseline_price")
+                sizes = src.get("sizes", [])
+                size_str = f" | sizes: {', '.join(sizes)}" if sizes else " | sizes: —"
+                baseline_str = f"baseline ₹{baseline:,.2f}" if baseline else "baseline: —"
+                lines.append(f"   [{site.upper()}] {baseline_str}{size_str}")
+                lines.append(f"      <code>{url}</code>")
         return "\n".join(lines)
 
     def _cmd_remove(self, args: list) -> str:
         if not args:
-            return "Usage: /remove &lt;url or #&gt;"
+            return "Usage: /remove &lt;name or #&gt;"
         idx = self._find_product_index(args[0])
         if idx is None:
             return f"Couldn't find a tracked product matching: {args[0]}"
@@ -259,24 +277,30 @@ class TelegramBot:
         return f"🗑️ Removed: {removed.get('name') or removed.get('url')}"
 
     def _cmd_status(self) -> str:
-        from scraper import fetch_price
+        from scraper import fetch_price_and_sizes as fetch_hm
+        from myntra_scraper import fetch_price_and_sizes as fetch_myntra
 
         products = self._products()
         if not products:
             return "No products being tracked yet."
-        lines = ["<b>Current prices:</b>"]
+        lines = ["<b>Current prices & sizes:</b>"]
         for p in products:
-            url = p.get("url", "")
-            name = p.get("name") or url
-            try:
-                price = fetch_price(url, force_browser=True)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Price check failed for %s: %s", url, exc)
-                price = None
-            if price is not None:
-                lines.append(f"• {name}: ₹{price:,.2f}")
-            else:
-                lines.append(f"• {name}: <i>could not read price</i>")
+            name = p.get("name") or "Untitled"
+            lines.append(f"• <b>{name}</b>")
+            for site, url in self._source_urls(p):
+                try:
+                    if site == "myntra":
+                        price, sizes = fetch_myntra(url, force_browser=True)
+                    else:
+                        price, sizes = fetch_hm(url, force_browser=True)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Status check failed for %s: %s", url, exc)
+                    price, sizes = None, []
+                if price is not None:
+                    size_str = f" | sizes: {', '.join(sizes)}" if sizes else " | sizes: —"
+                    lines.append(f"   [{site.upper()}] ₹{price:,.2f}{size_str}")
+                else:
+                    lines.append(f"   [{site.upper()}] <i>could not read price</i>")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ #
@@ -334,7 +358,7 @@ class TelegramBot:
             sys.exit(1)
 
         log.info("Bot started. Send /help to your bot from Telegram.")
-        self.send_message("🤖 H&amp;M Price Tracker bot is online. Send /help for commands.")
+        self.send_message("🤖 Price Tracker bot is online. Send /help for commands.")
 
         while self._running:
             try:

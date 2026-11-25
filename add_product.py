@@ -4,7 +4,8 @@ Run this instead of editing config.yaml by hand:
 
     python add_product.py
 
-It will prompt you for the product details and append them to config.yaml.
+It will prompt you for product details and append them to config.yaml.
+Supports H&M India and Myntra URLs.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ from pathlib import Path
 import yaml
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+
+HM_URL_RE = re.compile(r"hm\.com/en_in/productpage\.\d+\.html")
+MYNTRA_URL_RE = re.compile(r"myntra\.com")
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -28,23 +32,20 @@ def _ask(prompt: str, default: str | None = None) -> str:
     return value
 
 
-def _ask_price(prompt: str) -> float | None:
-    while True:
-        raw = input(prompt).strip()
-        if not raw:
-            return None
-        try:
-            return float(raw.replace(",", "").replace("₹", "").replace("Rs.", "").strip())
-        except ValueError:
-            print("  Please enter a valid number (e.g. 1499 or 1,499.00).")
+def _detect_site(url: str) -> str:
+    if MYNTRA_URL_RE.search(url):
+        return "myntra"
+    if HM_URL_RE.search(url):
+        return "hm"
+    return "hm"
 
 
-def _is_hm_url(url: str) -> bool:
-    return bool(re.search(r"hm\.com.*productpage\.\d+\.html", url))
+def _is_valid_url(url: str) -> bool:
+    return bool(HM_URL_RE.search(url) or MYNTRA_URL_RE.search(url))
 
 
 def main() -> None:
-    print("=== Add H&M India Product to Tracker ===\n")
+    print("=== Add Product to Price Tracker ===\n")
 
     if not CONFIG_PATH.exists():
         print(f"config.yaml not found at {CONFIG_PATH}")
@@ -55,49 +56,55 @@ def main() -> None:
 
     products = config.setdefault("products", [])
 
-    url = _ask("H&M product page URL")
-    if not _is_hm_url(url):
-        print("\nWarning: that doesn't look like an H&M India product page URL.")
-        print("Expected format: https://www2.hm.com/en_in/productpage.1234567.html")
-        cont = input("Continue anyway? (y/N): ").strip().lower()
-        if cont != "y":
-            print("Cancelled.")
-            return
+    while True:
+        url = _ask("Product page URL (or press Enter to finish)")
+        if not url:
+            break
 
-    name = _ask("Product name (optional, used in alerts)", default="")
-    if not name:
-        name = url
+        if not _is_valid_url(url):
+            print("\nThat doesn't look like an H&M India or Myntra product URL.")
+            print("Expected H&M: https://www2.hm.com/en_in/productpage.1234567.html")
+            print("Expected Myntra: https://www.myntra.com/...")
+            cont = input("Continue anyway? (y/N): ").strip().lower()
+            if cont != "y":
+                continue
 
-    bought_price = _ask_price("Price you paid (₹) — press Enter to skip: ")
-    target_price = _ask_price("Steal / target price to buy at (₹) — press Enter to skip: ")
+        site = _detect_site(url)
 
-    if bought_price is None and target_price is None:
-        print("\nYou must set at least one of: bought_price or target_price.")
-        print("Cancelled.")
-        return
+        # Check for duplicate URL across all products.
+        dup = False
+        for p in products:
+            for s in p.get("sources", []):
+                if s.get("url") == url:
+                    dup = True
+                    break
+            if dup:
+                break
+        if dup:
+            print(f"\nThat URL is already being tracked.\n")
+            continue
 
-    product = {
-        "name": name,
-        "url": url,
-        "bought_price": bought_price,
-        "target_price": target_price,
-        "currency": "INR",
-    }
-    # Drop None values so the YAML stays clean.
-    product = {k: v for k, v in product.items() if v is not None}
+        name = _ask("Product name (optional)", default="")
+        if not name:
+            name = url.split("/")[-1]
 
-    products.append(product)
+        product: dict = {
+            "name": name,
+            "currency": "INR",
+            "sources": [{"site": site, "url": url}],
+        }
 
-    with CONFIG_PATH.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)
+        products.append(product)
 
-    print(f"\nAdded '{name}' to {CONFIG_PATH.name}")
-    print(f"  URL: {url}")
-    if bought_price is not None:
-        print(f"  Bought price: ₹{bought_price:,.2f}")
-    if target_price is not None:
-        print(f"  Target price: ₹{target_price:,.2f}")
-    print("\nRun: python main.py --dry-run   (to test)")
+        with CONFIG_PATH.open("w", encoding="utf-8") as fh:
+            yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)
+
+        site_label = site.upper()
+        print(f"\nAdded ({site_label}): '{name}'")
+        print(f"  URL: {url}")
+        print("  Baseline price & sizes will be set on the first check.\n")
+
+    print("Done. Run: python main.py --dry-run   (to test)")
     print("Or wait for the scheduled GitHub Actions run.")
 
 
