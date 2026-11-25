@@ -39,7 +39,7 @@ jobs:
         run: playwright install chromium --with-deps
 
       - name: Run price tracker
-        working-directory: /
+        working-directory: /home/runner/work/hm-price-tracker/hm-price-tracker
         env:
           HM_USE_BROWSER: "1"
           HM_TELEGRAM_BOT_TOKEN: ${{ secrets.HM_TELEGRAM_BOT_TOKEN }}
@@ -47,9 +47,7 @@ jobs:
           HM_EMAIL_USERNAME: ${{ secrets.HM_EMAIL_USERNAME }}
           HM_EMAIL_PASSWORD: ${{ secrets.HM_EMAIL_PASSWORD }}
           HM_EMAIL_TO: ${{ secrets.HM_EMAIL_TO }}
-        run: |
-          cd hm-price-tracker
-          python main.py
+        run: python main.py
 
       - name: Upload logs (always, even on failure)
         if: always()
