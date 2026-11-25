@@ -1,0 +1,34 @@
+# H&M India Price Tracker — configuration template
+# Copy this file to config.yaml and fill in your products & secrets.
+# config.yaml is gitignored — your real URLs and credentials stay local.
+
+notifications:
+  telegram:
+    enabled: true
+    bot_token: "YOUR_TELEGRAM_BOT_TOKEN"      # or env HM_TELEGRAM_BOT_TOKEN
+    chat_id: "YOUR_CHAT_ID"                    # or env HM_TELEGRAM_CHAT_ID
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    username: "YOUR_EMAIL@gmail.com"           # or env HM_EMAIL_USERNAME
+    password: "YOUR_APP_PASSWORD"              # or env HM_EMAIL_PASSWORD
+    to: "YOUR_EMAIL@gmail.com"                 # or env HM_EMAIL_TO
+
+settings:
+  check_interval_hours: 6
+  currency: "INR"
+  data_dir: "data"
+
+products:
+  - name: "My Cotton Shirt (bought ₹1499)"
+    url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
+    bought_price: 1499.0
+    target_price: null
+    currency: "INR"
+
+  - name: "Wishlist Jacket (steal price ₹2499)"
+    url: "https://www2.hm.com/en_in/productpage.REPLACE_ME.html"
+    bought_price: null
+    target_price: 2499.0
+    currency: "INR"

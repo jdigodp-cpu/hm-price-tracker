@@ -1,0 +1,58 @@
+name: H&M India Price Tracker
+
+on:
+  schedule:
+    # Check every 3 hours (UTC). During Black Friday sales you can bump this
+    # up to every hour (`0 * * * *`) — cron is UTC; India (IST) is UTC+5:30,
+    # so a UTC 3-hour cadence lands at roughly 3:30 AM, 6:30 AM, 9:30 AM IST, etc.
+    - cron: "0 */3 * * *"
+  workflow_dispatch:   # run manually from the Actions tab whenever you like
+
+permissions: {}
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show current time in India (IST)
+        run: |
+          python3 -c "
+          from datetime import datetime, timezone, timedelta
+          ist = timezone(timedelta(hours=5, minutes=30))
+          now = datetime.now(ist)
+          print(f'Current IST time: {now.strftime(\"%Y-%m-%d %I:%M %p\")}')
+          print(f'UTC time: {datetime.now(timezone.utc).strftime(\"%Y-%m-%d %I:%M %p\")}')
+          "
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt playwright
+
+      - name: Install Chromium browser (for Akamai-bypass fetcher)
+        run: playwright install chromium --with-deps
+
+      - name: Run price tracker
+        env:
+          HM_USE_BROWSER: "1"
+          HM_TELEGRAM_BOT_TOKEN: ${{ secrets.HM_TELEGRAM_BOT_TOKEN }}
+          HM_TELEGRAM_CHAT_ID: ${{ secrets.HM_TELEGRAM_CHAT_ID }}
+          HM_EMAIL_USERNAME: ${{ secrets.HM_EMAIL_USERNAME }}
+          HM_EMAIL_PASSWORD: ${{ secrets.HM_EMAIL_PASSWORD }}
+          HM_EMAIL_TO: ${{ secrets.HM_EMAIL_TO }}
+        run: python main.py
+
+      - name: Upload logs (always, even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hm-price-logs
+          path: |
+            data/
+          retention-days: 30

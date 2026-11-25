@@ -1,0 +1,17 @@
+# Real credentials / config (never commit)
+config.yaml
+.env
+
+# Price history state (local only)
+data/
+*.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
