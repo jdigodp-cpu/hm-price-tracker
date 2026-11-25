@@ -1,4 +1,4 @@
-name: H&M India Price Tracker
+name: H&M & Myntra Price Tracker
 
 on:
   schedule:
@@ -37,6 +37,16 @@ jobs:
 
       - name: Install Chromium browser (for Akamai-bypass fetcher)
         run: playwright install chromium --with-deps
+
+      - name: Create config.yaml from example
+        run: |
+          cp config.yaml.example config.yaml
+          # Replace placeholder bot token
+          sed -i 's|YOUR_TELEGRAM_BOT_TOKEN|${HM_TELEGRAM_BOT_TOKEN}|g' config.yaml
+          # Replace placeholder chat ID
+          sed -i 's|YOUR_CHAT_ID|${HM_TELEGRAM_CHAT_ID}|g' config.yaml
+          # Replace example URLs with REPLACE_ME (they'll be overwritten by add_product.py or user editing)
+          # Just ensure the file is valid YAML
 
       - name: Run price tracker
         working-directory: /home/runner/work/hm-price-tracker/hm-price-tracker
