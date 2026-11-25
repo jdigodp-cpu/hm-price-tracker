@@ -84,9 +84,10 @@ def fetch_for_source(source: dict, force_browser: bool = False):
     """
     site = source.get("site", "hm").lower()
     url = source.get("url", "")
-    fetcher = FETCHERS.get(site, fetch_price_and_sizes)
+    # Only HM fetcher supports force_browser; Myntra uses default path
+    fetcher = FETCHERS.get(site, fetch_price_and_sizes) if site == "hm" else fetch_myntra_price_and_sizes
     try:
-        return fetcher(url, force_browser=force_browser)
+        return fetcher(url, timeout=30)
     except Exception as exc:  # noqa: BLE001
         log.warning("Fetch failed for %s (%s): %s", url, site, exc)
         return None, []
